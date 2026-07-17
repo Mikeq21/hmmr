@@ -1,0 +1,15 @@
+# ROS build files
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.pyc
+
+# Editors
+.vscode/
+.idea/
+
+# OS
+.DS_Store
