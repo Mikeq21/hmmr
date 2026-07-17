@@ -24,6 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            'health_monitor = hmmr_diagnostics.health_monitor:main',
         ],
     },
 )
