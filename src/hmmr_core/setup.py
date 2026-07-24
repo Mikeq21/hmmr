@@ -24,6 +24,8 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            "robot_state = hmmr_core.robot_state:main",
+            "mission_manager = hmmr_core.mission_manager:main",
         ],
     },
 )

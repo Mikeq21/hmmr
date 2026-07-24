@@ -35,7 +35,7 @@ class HealthMonitor(Node):
 
     def publish_status(self):
 
-        self.battery -= 0.1
+        self.battery -= 5.0
 
         battery_msg = Float32()
         battery_msg.data = self.battery
