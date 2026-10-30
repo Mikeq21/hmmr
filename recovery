@@ -1,0 +1,355 @@
+# HMMR — Development Environment & Recovery Guide
+
+**Repository:** `https://github.com/Mikeq21/hmmr`  
+**Workspace:** `~/ros2_ws`  
+**ROS distribution:** ROS 2 Humble  
+**Operating system inside Docker:** Ubuntu 22.04 (Jammy)  
+**Simulator:** Gazebo Fortress (Ignition Gazebo 6.18.0)  
+**Current development host:** Chromebook running ChromeOS with Debian 12 (Crostini)
+
+---
+
+## 1. Purpose
+
+This document defines how to preserve, restore, and continue HMMR development across different computers.
+
+The project must not depend on a particular computer, Docker container, or temporary development session.
+
+We maintain three separate recovery layers:
+
+1. **GitHub:** Authoritative backup of project source code and documentation.
+2. **Docker environment:** ROS 2, Gazebo, and installed development dependencies.
+3. **Local workspace:** Working copy of the repository, mounted into the Docker container.
+
+GitHub is the primary source of truth for project code. Docker provides the development environment, but the environment must eventually be reproducible independently of the original Chromebook.
+
+## 2. Current development environment
+
+### Host machine
+
+- Chromebook
+- ChromeOS with Debian 12 (Crostini)
+- Intel i5-10210U
+- 6.4 GB RAM
+- Integrated graphics
+- Approximately 50 GB filesystem
+
+The Chromebook uses software-rendered graphics through Mesa `llvmpipe`. Gazebo's graphical interface works, but simulation performance may be limited.
+
+### Docker environment
+
+| Component | Current configuration |
+|---|---|
+| Container | `hmmr_sim` |
+| Docker image | `hmmr:ros2-humble-gazebo` |
+| Base image | `osrf/ros:humble-desktop` |
+| ROS | Humble |
+| Ubuntu | 22.04 |
+| Gazebo | Fortress 6.18.0 |
+| Networking | Host networking |
+| Workspace | `/root/ros2_ws` |
+
+The original container, `ros2_humble`, has been retained as a fallback.
+
+### Workspace mapping
+
+The host and container share the same source files:
+
+- Host: `~/ros2_ws`
+- Container: `/root/ros2_ws`
+
+This is important: changes made inside the container are reflected in the host workspace.
+
+The workspace should remain outside the container's writable filesystem so that replacing the container does not destroy project source code.
+
+## 3. GitHub backup and version control
+
+### Repository
+
+`git@github.com:Mikeq21/hmmr.git`
+
+Primary branch: `main`
+
+### Starting development
+
+On a new or existing development machine:
+
+```bash
+cd ~/ros2_ws
+git status
+git pull --ff-only origin main
+```
+
+If the workspace does not exist:
+
+```bash
+git clone git@github.com:Mikeq21/hmmr.git ~/ros2_ws
+cd ~/ros2_ws
+```
+
+SSH authentication must be configured for the new machine before using the SSH repository URL.
+
+### Saving work
+
+Before major changes:
+
+```bash
+git status
+git diff
+```
+
+Stage intentional changes:
+
+```bash
+git add <files>
+```
+
+Commit:
+
+```bash
+git commit -m "Describe the changes"
+```
+
+Push:
+
+```bash
+git push origin main
+```
+
+Verify:
+
+```bash
+git status
+```
+
+The desired result is a clean working tree with the local branch synchronized with `origin/main`.
+
+### If Git branches diverge
+
+Never immediately force-push.
+
+First inspect:
+
+```bash
+git fetch origin
+git status
+git log --oneline --graph --decorate --all -15
+```
+
+Determine which commits exist on each branch before merging or rebasing.
+
+Preserve both local and remote work. Resolve conflicts deliberately, then push the integrated result.
+
+### Git best practices
+
+- Commit after each meaningful development milestone.
+- Commit before changing robot descriptions, simulation configuration, or core autonomy logic.
+- Use descriptive commit messages.
+- Do not commit generated build directories.
+- Keep credentials, private keys, and machine-specific configuration out of Git.
+- Keep documentation updated as the project changes.
+
+## 4. Recreating the current Docker container
+
+**Important:** The current Docker image is locally stored on the original Chromebook. It is not automatically available on another computer.
+
+If the image is available on the new machine, the current container can be recreated using:
+
+```bash
+docker run -d -it \
+  --name hmmr_sim \
+  --network host \
+  -e DISPLAY=:0 \
+  -e XAUTHORITY=/tmp/.Xauthority \
+  -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
+  -v ~/.Xauthority:/tmp/.Xauthority:ro \
+  -v ~/ros2_ws:/root/ros2_ws \
+  --entrypoint bash \
+  hmmr:ros2-humble-gazebo
+```
+
+This command reflects the original Chromebook's X11 configuration. It is not a universal display configuration for every operating system.
+
+Enter the running container:
+
+```bash
+docker exec -it hmmr_sim bash
+```
+
+Load ROS:
+
+```bash
+source /opt/ros/humble/setup.bash
+```
+
+Verify the environment:
+
+```bash
+ros2 --version
+ign gazebo --version
+```
+
+The expected Gazebo version is 6.18.0.
+
+### Preserving the Docker image
+
+The current image can be exported on the original machine:
+
+```bash
+docker save hmmr:ros2-humble-gazebo \
+  -o hmmr_ros2_humble_gazebo.tar
+```
+
+It can then be transferred to another machine and imported:
+
+```bash
+docker load -i hmmr_ros2_humble_gazebo.tar
+```
+
+This preserves the image, but not the contents of a container's writable layer that were never committed to the image.
+
+For that reason, important environment changes should be incorporated into a new image.
+
+The image archive may be several gigabytes. Store it somewhere with sufficient capacity.
+
+**Long-term improvement:** Create a Dockerfile and setup scripts in the HMMR repository. This will allow the development environment to be rebuilt instead of relying on a manually exported image.
+
+## 5. Rebuilding the ROS workspace
+
+Inside the container:
+
+```bash
+cd /root/ros2_ws
+source /opt/ros/humble/setup.bash
+```
+
+Build:
+
+```bash
+colcon build --symlink-install
+```
+
+Load the workspace:
+
+```bash
+source install/setup.bash
+```
+
+Check package discovery:
+
+```bash
+ros2 pkg list | grep hmmr
+```
+
+If a build fails, inspect the first actual compiler or dependency error rather than deleting the workspace.
+
+The `build`, `install`, and `log` directories are generated artifacts. They can be recreated by building the workspace again.
+
+## 6. Current Gazebo setup
+
+The current Gazebo installation uses Fortress, which uses the `ign` command-line interface.
+
+Launch an empty world:
+
+```bash
+ign gazebo -v 3 empty.sdf
+```
+
+The graphical interface has been verified working from the `hmmr_sim` container on the Chromebook using X11 forwarding.
+
+The container uses:
+
+- Host networking
+- `DISPLAY=:0`
+- The host X11 socket mounted at `/tmp/.X11-unix`
+- The host Xauthority file mounted into the container
+
+Other devices may use different display forwarding configurations.
+
+**Current verified milestone:** Gazebo's graphical interface opens an empty world. HMMR spawning, physics validation, and robot movement still need to be completed.
+
+## 7. HMMR project structure and important files
+
+The repository contains ROS packages under `src/`.
+
+Important components include:
+
+- `hmmr_description`: Robot description, Xacro, and RViz configuration.
+- `hmmr_bringup`: Launch and system startup configuration.
+- `hmmr_core`: Mission management and core robot logic.
+
+Important robot description:
+
+```text
+src/hmmr_description/urdf/hmmr.urdf.xacro
+```
+
+The robot currently has an orange chassis with a base dimension of approximately 0.55 × 0.45 × 0.25 meters.
+
+Preserve the orange visual material when modifying the robot description:
+
+```xml
+<color rgba="1.0 0.35 0.0 1.0"/>
+```
+
+The mission manager is located at:
+
+```text
+src/hmmr_core/hmmr_core/mission_manager.py
+```
+
+The workspace should be inspected before assuming package names, launch files, or executable names.
+
+## 8. Recovery on a completely new device
+
+The recommended recovery sequence is:
+
+1. Install Docker on the new host.
+2. Install and configure Git.
+3. Configure SSH access to GitHub.
+4. Clone the HMMR repository.
+5. Obtain the HMMR Docker image or rebuild it from the future Dockerfile.
+6. Create a container with the workspace mounted.
+7. Configure graphical display forwarding if Gazebo GUI is required.
+8. Enter the container and source ROS Humble.
+9. Build the workspace using `colcon`.
+10. Verify package discovery and launch the appropriate HMMR nodes.
+11. Start Gazebo and resume development from the latest GitHub commit.
+
+The new machine does not need to reproduce the Chromebook's exact hardware. However, it must provide a compatible Linux/Docker environment and sufficient resources for the intended simulation workload.
+
+## 9. Backup and milestone policy
+
+Before each major milestone:
+
+- Confirm the Git working tree is clean.
+- Commit and push source changes.
+- Verify that the latest commit exists on GitHub.
+- Preserve the known-good Docker environment.
+- Update this document when setup instructions change.
+
+Before removing any Docker container or image:
+
+- Confirm the replacement environment works.
+- Confirm all source files are backed up.
+- Confirm important environment changes are preserved.
+- Verify that the project can be rebuilt.
+
+Never delete the only known-good environment before verifying its replacement.
+
+## 10. Future improvements
+
+The following improvements will make HMMR easier to transfer between machines:
+
+- [ ] Add a reproducible Dockerfile.
+- [ ] Add a container startup script.
+- [ ] Document all required ROS and Gazebo dependencies.
+- [ ] Add a README describing the complete development workflow.
+- [ ] Document the exact Gazebo spawning procedure.
+- [ ] Add automated workspace build checks.
+- [ ] Consider publishing a versioned Docker image to a container registry.
+- [ ] Record known-good project milestones and corresponding Git commits.
+
+---
+
+**Guiding principle:** HMMR should be recoverable from its GitHub repository and documented environment setup without depending on the original Chromebook or a particular Docker container.
