@@ -5,70 +5,85 @@ from std_msgs.msg import Float32
 from std_msgs.msg import String
 
 
+MISSION_UPDATE_RATE = 2.0  # Hz
+
+
 class MissionManager(Node):
 
     def __init__(self):
-
         super().__init__("mission_manager")
 
+        # Publishers
         self.publisher = self.create_publisher(
             String,
             "/hmmr/mission_mode",
-            10
+            10,
         )
 
-        self.battery = 100.0
-
+        # Subscribers
         self.battery_sub = self.create_subscription(
             Float32,
             "/hmmr/battery",
             self.battery_callback,
-            10
+            10,
         )
 
-        self.mode = "IDLE"
+        # Robot State
+        self.battery = 100.0
+        self.mode = None
 
+        # Main mission evaluation loop
         self.timer = self.create_timer(
-            2.0,
-            self.publish_mode
+            1.0 / MISSION_UPDATE_RATE,
+            self.evaluate_mission,
         )
 
-        self.get_logger().info(
-            "Mission Manager started."
-        )
+        self.get_logger().info("Mission Manager started.")
 
+    def evaluate_mission(self):
+        """Determine the robot's current mission based on battery level."""
 
-    def publish_mode(self):
+        if self.battery < 5.0:
+            new_mode = "FAULT"
 
-        if self.battery < 5:
-           self.mode = "FAULT"
-
-        elif self.battery < 20:
-           self.mode = "RETURNING_HOME"
+        elif self.battery < 20.0:
+            new_mode = "RETURNING_HOME"
 
         else:
-           self.mode = "INSPECTING"
+            new_mode = "INSPECTING"
 
-        msg = String()
-        msg.data = self.mode
+        # Only publish when the mission changes.
+        if new_mode != self.mode:
+            self.mode = new_mode
 
-        self.publisher.publish(msg)
+            msg = String()
+            msg.data = self.mode
+
+            self.publisher.publish(msg)
+
+            self.get_logger().info(
+                f"Mission changed to: {self.mode}"
+            )
 
     def battery_callback(self, msg):
+        """Store the latest battery percentage."""
         self.battery = msg.data
 
 
 def main(args=None):
-
     rclpy.init(args=args)
 
     node = MissionManager()
 
-    rclpy.spin(node)
+    try:
+        rclpy.spin(node)
 
-    node.destroy_node()
+    except KeyboardInterrupt:
+        pass
 
-    rclpy.shutdown()
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
 
 if __name__ == "__main__":
